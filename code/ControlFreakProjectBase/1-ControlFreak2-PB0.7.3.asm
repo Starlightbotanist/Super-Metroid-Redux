@@ -22,8 +22,8 @@
 
 ;Remove old Item Cancel checks - DONE
 
-;Redo transition table for aim up/down - DONE. A few breaks but they're acceptable
-;[22:04] <Kejardon> getting hit breaks aim-lock, that one makes sense though. It'd also be nigh-impossible to fix without an overarching aim-lock code though.
+;Redo transition table for aim up/down - DONE
+;Preserve aim-lock when hit - DONE
 ;Maybe fix spin/space jump aiming - DONE
 
 ;81B339 is part of new game initialization, probably leave alone.
@@ -524,6 +524,287 @@ FallTransitions:	;29, 2A, 31, 32, 33, 34, 7D, 7E
 	DB $6E,$6F,$70,$FF,$FF,$29,$2A,$29,$2A,$29,$2A,$FF,$FF,$FF,$FF,$FF
 	DB $2B,$2C,$6D,$6E,$6F,$70,$29,$2A,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF
 	DB $FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF
+
+;Keep the arm raised after jumping, falling, crouching or turning while aiming up
+org $91F60D
+	LDA $0B42
+	ORA $0B44
+	BEQ +
+	LDA #$0002
++
+	STA $0B4A
+	JMP $F4DC
+	NOP #6
+warnpc $91F624
+
+org $91F4F0
+	JMP PreviousUpTurn
+	NOP #4
+warnpc $91F4F7
+
+org $91F5BC
+	JSR PreviousUpTurn
+	JMP $F5CF
+	NOP #13
+warnpc $91F5CF
+
+org $91F5F8
+	JSR PreviousUpTurn
+	JMP $F60B
+	NOP #13
+warnpc $91F60B
+
+;Former input-table space; input tables now use bank B8
+org $91A800
+PreviousUpTurn:
+	;Upward turns: 8B/8C standing, 8F/90 jumping, 93/94 falling, 97/98 crouching
+	LDA $0A20
+	SEC
+	SBC #$008B
+	CMP #$000E
+	BCS PreviousUpDirection
+	BIT #$0002
+	BEQ UpTurnRaised
+PreviousUpDirection:
+	LDA $0A20
+	ASL A
+	ASL A
+	ASL A
+	TAX
+	JMP $F4F7
+UpTurnRaised:
+	JMP $F504
+warnpc $91A81E
+
+;Preserve held aim through knockback and damage boosting
+;$0A98: 0 = inactive, 2 = up, 4 = diagonal up, 6 = diagonal down
+;Cleared by Samus initialization with the rest of her state
+org $90DEFA
+	JSL RememberDamageAim
+	NOP #2
+warnpc $90DF00
+
+org $918006
+	JSR MaintainDamageAim
+warnpc $918009
+
+org $91F439
+	JSR RestoreDamageAim
+	NOP #3
+warnpc $91F43F
+
+org $91A820
+RememberDamageAim:
+	PHP
+	PHX
+	STZ $0A98
+	LDA $0A60
+	CMP #$E91D
+	BEQ RememberDamageAimEnd	;Leave recorded demos unchanged
+	LDA $8B
+	BIT $09BE
+	BEQ RememberDamageAimEnd
+	LDA $0A1C
+	ASL A
+	ASL A
+	ASL A
+	TAX
+	LDA.l $91B62C,X
+	AND #$00FF
+	CMP #$000A
+	BCS RememberDamageAimEnd
+	ASL A
+	TAX
+	LDA.l DamageAimDirections,X
+	STA $0A98
+RememberDamageAimEnd:
+	PLX
+	PLP
+	LDA $0A1E
+	AND #$00FF
+	RTL
+
+MaintainDamageAim:
+	PHP
+	LDA $0A98
+	BEQ MaintainDamageAimEnd
+	LDA $8B
+	BIT $09BE
+	BEQ ClearDamageAim
+	LDA $8F
+	BIT $09BE
+	BNE ClearDamageAim	;Releasing/re-pressing starts a new lock
+	LDA $0A1C
+	JSR IsDamageAimPose
+	BCS MaintainDamageAimEnd
+ClearDamageAim:
+	STZ $0A98
+MaintainDamageAimEnd:
+	PLP
+	LDA $0A1F
+	RTS
+
+RestoreDamageAim:
+	LDA $0A98
+	BEQ RestoreDamageAimEnd
+	CMP #$0002
+	BEQ ValidDamageAim
+	CMP #$0004
+	BEQ ValidDamageAim
+	CMP #$0006
+	BNE RestoreDamageAimClear
+ValidDamageAim:
+	LDA $8B
+	BIT $09BE
+	BEQ RestoreDamageAimClear
+	LDA $0A1C
+	JSR IsDamageAimPose
+	BCS RestoreDamageAimEnd
+	LDA $0A20
+	JSR IsDamageAimPose
+	BCC RestoreDamageAimClear
+	PHY
+	LDX #$0000
+FindDamageRecoveryPose:
+	LDA $0A1C
+	SEC
+	SBC DamageRecoveryPoses,X
+	CMP #$0002
+	BCC SetDamageRecoveryPose
+	TXA
+	CLC
+	ADC #$0008
+	TAX
+	CPX #DamageRecoveryPosesEnd-DamageRecoveryPoses
+	BCC FindDamageRecoveryPose
+	PLY
+	BRA RestoreDamageAimClear
+SetDamageRecoveryPose:
+	TAY
+	TXA
+	CLC
+	ADC $0A98
+	TAX
+	TYA
+	CLC
+	ADC DamageRecoveryPoses,X
+	STA $0A1C
+	PLY
+RestoreDamageAimClear:
+	STZ $0A98	;The recovered pose now holds the angle
+RestoreDamageAimEnd:
+	LDA $0A1C
+	ASL A
+	ASL A
+	ASL A
+	RTS
+
+IsDamageAimPose:
+	CMP #$0053
+	BEQ DamageAimPose
+	CMP #$0054
+	BEQ DamageAimPose
+	CMP #$004F
+	BEQ DamageAimPose
+	CMP #$0050
+	BEQ DamageAimPose
+	CLC
+	RTS
+DamageAimPose:
+	SEC
+	RTS
+
+DamageAimDirections:
+	;Shot directions 0 through 9
+	DW $0002,$0004,$0000,$0006,$0006,$0006,$0006,$0000,$0004,$0002
+
+DamageRecoveryPoses:
+	;Neutral right-facing pose, then up, diagonal up, diagonal down; +1 faces left
+	DW $0001,$0003,$0005,$0007	;Standing
+	DW $0009,$000D,$000F,$0011	;Running
+	DW $000B,$000D,$000F,$0011	;Running, gun extended
+	DW $0013,$0015,$0069,$006B	;Airborne, gun extended
+	DW $0027,$0085,$0071,$0073	;Crouching
+	DW $0029,$002B,$006D,$006F	;Falling
+	DW $004D,$0015,$0069,$006B	;Airborne, gun not extended
+AirborneAimPoses:
+	DW $0051,$0015,$0069,$006B	;Airborne, moving forward
+	DW $0067,$002B,$006D,$006F	;Falling, gun extended
+	DW $0089,$0003,$00CF,$00D1	;Ran into a wall
+	DW $00A4,$00E0,$00E2,$00E4	;Landing from normal jump
+	DW $00E6,$00E0,$00E2,$00E4	;Landing, firing
+DamageRecoveryPosesEnd:
+warnpc $91A96C
+
+;Preserve held aim when an unmorphed bomb jump starts
+org $90DFF7
+	JSL BombJumpAim
+	BRA $13	;Return through the original SEC / RTS
+warnpc $90DFFD
+
+org $91F4A6
+	DW BombJumpPoseInit
+
+org $91A96C
+BombJumpAim:
+	PHP
+	PHB
+	PHK
+	PLB
+	PHX
+	PHY
+	LDY #$0000
+	LDA $0A1E
+	AND #$00FF
+	CMP #$0004
+	BNE +
+	INY
++
+	LDX #$0000
+	LDA $0A60
+	CMP #$E91D
+	BEQ SetBombJumpAim
+	LDA $8B
+	BIT $09BE
+	BEQ SetBombJumpAim
+	LDA $0A1C
+	ASL A
+	ASL A
+	ASL A
+	TAX
+	LDA $B62C,X
+	AND #$00FF
+	CMP #$000A
+	BCS NeutralBombJump
+	ASL A
+	TAX
+	LDA.w DamageAimDirections,X
+	TAX
+	BRA SetBombJumpAim
+NeutralBombJump:
+	LDX #$0000
+SetBombJumpAim:
+	TYA
+	CLC
+	ADC.w AirborneAimPoses,X
+	STA $0A2A
+	PLY
+	PLX
+	PLB
+	PLP
+	LDA $0A2A
+	RTL
+
+BombJumpPoseInit:
+	;A bomb launch must not activate a stored shinespark.
+	LDA $0A30
+	CMP #$0003
+	BEQ +
+	JMP $F543
++
+	JMP $F59A
+BombJumpAimEnd:
+warnpc $91AA00
 
 org $9284CF
 ;Need to copy pattern from other running tilemaps(904F7 and 9050B) and apply to 97FF and 981A bases

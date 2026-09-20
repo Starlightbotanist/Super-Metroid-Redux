@@ -4,7 +4,12 @@ PC adress :
 3-projectcontrolfreakbase-PB0.7.3.asm        :  87870 to 8788E
 2-ControlFreak2-PB0.7.3-UIUpdate.asm         :  87B90 to 87BB7
 2-ControlFreak2-PB0.7.3-UIUpdate.asm         :  87D10 to 87DBB
+1-ControlFreak2-PB0.7.3.asm                 :  88800 to 8881D
+1-ControlFreak2-PB0.7.3.asm                 :  88820 to 8896B
+1-ControlFreak2-PB0.7.3.asm                 :  8896C to 889CD
 2-ControlFreak2-PB0.7.3-UIUpdate.asm         :  96E10 to 96E7B
 2-ControlFreak2-PB0.7.3-UIUpdate.asm         :  97F20 to 97F2F
 2-ControlFreak2-PB0.7.3-UIUpdate.asm         : 1C2000 to 1C341F
 3-projectcontrolfreakbase-PB0.7.3.asm        : 1C3420 to 1C35EB
+
+RAM: 0A98 to 0A99 - saved aim during knockback (1-ControlFreak2-PB0.7.3.asm)
